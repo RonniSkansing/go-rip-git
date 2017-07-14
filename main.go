@@ -16,60 +16,79 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
+	"time"
 
 	"golang.org/x/net/proxy"
 )
 
-var client *http.Client
+type fileTransferResult struct {
+	Err       error
+	LocalFile string
+}
 
-// TODO: Set sensible timeout options and flags
+func fileResultLogger(c chan (fileTransferResult)) {
+	for {
+		r := <-c
+		if r.Err != nil {
+			outputFileSkipped(r.Err, r.LocalFile)
+		} else {
+			outputFileAdded(r.LocalFile)
+		}
+	}
+}
+
 // https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
 func main() {
-	proxyFlag := flag.String("p", "", "Proxy URI to use, ex. -p \"127.0.0.1:9150\"")
-	urlFlag := flag.String("u", "", "URL to scan")
-	flag.Parse()
+	proxyURI, targetURL, maxIdleConn, maxIdleTime := setupFlags()
 
-	var err error
-	if *proxyFlag != "" {
-		client, err = getProxyHTTP(*proxyFlag)
-	} else {
-		client, err = getHTTP()
-	}
+	transport := newClientTransport(maxIdleConn, maxIdleTime)
+	client, err := newClient(transport, proxyURI)
+
 	if err != nil {
-		log.Println(err)
+		outputError(err, "Failed to setup client")
 		return
 	}
 
-	projectURI, err := url.ParseRequestURI(*urlFlag)
+	projectURI, err := url.ParseRequestURI(targetURL)
 	if err != nil {
-		fmt.Println("Invalid URL : " + *urlFlag)
+		if len(targetURL) == 0 {
+			outputError(err, "URL is empty. Set one with -u")
+			return
+		}
+		outputError(errors.New("Invalid URL "), targetURL)
 		return
 	}
 
-	log.Println("Trying " + *urlFlag)
-	res, err := client.Get(*urlFlag + "/.git/index")
+	ripGit(client, targetURL, *projectURI)
+}
+
+func ripGit(client *http.Client, targetURL string, projectURI url.URL) {
+	cl := make(chan fileTransferResult)
+	go fileResultLogger(cl)
+	var wg sync.WaitGroup
+	projectRoot := projectURI.Hostname()
+
+	outputInfo("Trying ", targetURL)
+	res, err := client.Get(targetURL + "/.git/index")
 	if err != nil {
-		log.Fatalln(err)
+		outputError(err)
 		return
 	}
 	defer res.Body.Close()
 
-	// TODO: read the 8-16 first bytes
 	if res.StatusCode != http.StatusOK {
-		log.Println("No git found or readable")
+		outputError(err, "Invalid response code")
 		return
 	}
 
 	indexFile, err := ioutil.ReadAll(res.Body)
 	if res.StatusCode != http.StatusOK {
-		log.Println("No readable : " + err.Error())
-
+		outputError(err, "Invalid response code for index file")
 		return
 	}
 
-	log.Println("Git index found at " + projectURI.Hostname())
-	log.Println("Building project folder and scanning git index file", "")
-	projectRoot := projectURI.Hostname()
+	outputInfo("Building ", projectURI.Hostname())
 	os.MkdirAll(projectRoot, os.ModePerm)
 
 	entryStartByteOffset := 12
@@ -88,20 +107,43 @@ func main() {
 		nullIndex := bytes.Index(indexFile[startFileIndex:], []byte("\000"))
 		fileName := indexFile[startFileIndex : startFileIndex+nullIndex]
 
-		remoteFile := *urlFlag + "/.git/objects/" + sha[0:2] + "/" + sha[2:]
+		remoteFile := targetURL + "/.git/objects/" + sha[0:2] + "/" + sha[2:]
 
 		entryLen := ((startFileIndex + len(fileName)) - entryBytePointer)
 		entryByted := entryLen + (8 - (entryLen % 8))
-		//fmt.Println(sha, nullIndex, len(fileName), string(fileName), entryByted)
 		entryBytePointer += entryByted
 
-		err := transferObjectToFile(remoteFile, projectURI.Hostname()+"/"+string(fileName))
-		if err != nil {
-			log.Println("- Skipped " + projectURI.Hostname() + "/" + string(fileName) + " " + err.Error())
-			continue
-		}
-		log.Println("+ Added " + projectURI.Hostname() + "/" + string(fileName))
+		wg.Add(1)
+		go getAndPersistFile(&wg, cl, client, remoteFile, projectRoot+"/"+string(fileName))
 	}
+	wg.Wait()
+}
+
+func setupFlags() (proxyURI string, targetURL string, maxIdleConn int, maxIdleTime int) {
+	var (
+		proxyFlag       = flag.String("p", "", "Proxy URI to use, ex. -p \"127.0.0.1:9150\"")
+		urlFlag         = flag.String("u", "", "URL to scan")
+		maxIdleConnFlag = flag.Int("c", 10, "Number of concurrent requests")
+		maxIdleTimeFlag = flag.Int("i", 5, "Max time in seconds a connection can be idle before timeout")
+	)
+	flag.Parse()
+
+	return *proxyFlag, *urlFlag, *maxIdleConnFlag, *maxIdleTimeFlag
+}
+
+func newClientTransport(maxIdleConns int, maxIdleTime int) *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:    maxIdleConns,
+		IdleConnTimeout: time.Duration(maxIdleTime) * time.Second,
+	}
+}
+
+func newClient(transport *http.Transport, proxyFlag string) (*http.Client, error) {
+	if proxyFlag != "" {
+		return getProxyHTTP(proxyFlag, transport)
+	}
+
+	return getHTTP(transport)
 }
 
 func testDialProxyReady(proxyURI string) (err error) {
@@ -112,7 +154,7 @@ func testDialProxyReady(proxyURI string) (err error) {
 	return
 }
 
-func getProxyHTTP(proxyURI string) (*http.Client, error) {
+func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, error) {
 	err := testDialProxyReady(proxyURI)
 	if err != nil {
 		return nil, errors.New("Proxy not ready : " + err.Error())
@@ -125,52 +167,92 @@ func getProxyHTTP(proxyURI string) (*http.Client, error) {
 	if err != nil {
 		return nil, errors.New("Failed to obtain proxy dialer: " + err.Error())
 	}
-	tbTransport := &http.Transport{Dial: tbDialer.Dial}
-	client = &http.Client{Transport: tbTransport}
+	tbTransport := &http.Transport{
+		Dial:                tbDialer.Dial,
+		MaxIdleConns:        transport.MaxIdleConns,
+		MaxIdleConnsPerHost: transport.MaxIdleConns,
+	}
 
-	return client, nil
+	return &http.Client{Transport: tbTransport}, nil
+}
+
+func outputError(err error, s ...string) {
+	log.Fatalln(fmt.Sprintf("Error : %v (%s)", s, err))
+}
+
+func outputInfo(s ...string) {
+	log.Println(fmt.Sprintf("Info : %v", s))
+}
+
+func outputFileAdded(s ...string) {
+	log.Println(fmt.Sprintf("+ Added %v", s))
+}
+
+func outputFileSkipped(err error, s ...string) {
+	log.Println(fmt.Sprintf("- Skipped %v (%s)", s, err))
 }
 
 // getHTTP
-func getHTTP() (*http.Client, error) {
-	return &http.Client{}, nil
+func getHTTP(transport *http.Transport) (*http.Client, error) {
+	return &http.Client{Transport: transport}, nil
 }
 
-func transferObjectToFile(remoteFile string, filePath string) error {
+func getAndPersistFile(wg *sync.WaitGroup, cl chan (fileTransferResult), client *http.Client, remoteFile string, filePath string) {
 	res, err := client.Get(remoteFile)
+	r := fileTransferResult{}
 	if err != nil {
-		return err
+		r.Err = err
+		cl <- r
+		wg.Done()
+		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return errors.New(strconv.Itoa(res.StatusCode) + " : Could not retrieve : " + remoteFile)
+		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " : Could not retrieve : " + remoteFile)
+		cl <- r
+		wg.Done()
+		return
 	}
 
 	objectFile, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return err
+		r.Err = err
+		cl <- r
+		wg.Done()
+		return
 	}
 	if res.StatusCode != http.StatusOK {
-		return errors.New(strconv.Itoa(res.StatusCode) + " Could not read :" + remoteFile)
+		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " Could not read :" + remoteFile)
+		cl <- r
+		wg.Done()
+		return
 	}
 
 	br := bytes.NewReader(objectFile)
 	zr, err := zlib.NewReader(br)
 	if err != nil {
-		return err
+		r.Err = err
+		cl <- r
+		wg.Done()
+		return
 	}
 
 	b, err := ioutil.ReadAll(zr)
 	if err != nil {
-		return err
+		r.Err = err
+		wg.Done()
+		cl <- r
+		return
 	}
 
 	nullIndex := bytes.Index(b, []byte("\000"))
 	createPathFromFilePath(filePath)
 	ioutil.WriteFile(string(filePath), b[nullIndex:], os.ModePerm)
 
-	return nil
+	r.LocalFile = remoteFile
+	cl <- r
+	wg.Done()
 }
 
 func createPathFromFilePath(filePath string) {
