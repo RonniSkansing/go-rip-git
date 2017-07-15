@@ -1,3 +1,10 @@
+// TODO tefactor 3x
+// TODO improve output format
+// TODO verbosity flag
+// TODO help command
+// TODO banner
+// TODO wishlist:  throttle
+
 package main
 
 import (
@@ -27,50 +34,27 @@ type fileTransferResult struct {
 	LocalFile string
 }
 
-func fileResultLogger(c chan (fileTransferResult)) {
-	for {
-		r := <-c
-		if r.Err != nil {
-			outputFileSkipped(r.Err, r.LocalFile)
-		} else {
-			outputFileAdded(r.LocalFile)
-		}
+type gitScraper struct {
+	client       *http.Client
+	resultLogger *chan (fileTransferResult)
+	waitGroup    *sync.WaitGroup
+}
+
+func newGitScraper(client *http.Client, resultLogger *chan (fileTransferResult)) *gitScraper {
+	return &gitScraper{
+		client:       client,
+		resultLogger: resultLogger,
+		waitGroup:    &sync.WaitGroup{},
 	}
 }
 
-// https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
-func main() {
-	proxyURI, targetURL, maxIdleConn, maxIdleTime := setupFlags()
+func (gs *gitScraper) scrapeURL(target *url.URL) {
+	var (
+		projectRoot = target.Hostname()
+	)
 
-	transport := newClientTransport(maxIdleConn, maxIdleTime)
-	client, err := newClient(transport, proxyURI)
-
-	if err != nil {
-		outputError(err, "Failed to setup client")
-		return
-	}
-
-	projectURI, err := url.ParseRequestURI(targetURL)
-	if err != nil {
-		if len(targetURL) == 0 {
-			outputError(err, "URL is empty. Set one with -u")
-			return
-		}
-		outputError(errors.New("Invalid URL "), targetURL)
-		return
-	}
-
-	ripGit(client, targetURL, *projectURI)
-}
-
-func ripGit(client *http.Client, targetURL string, projectURI url.URL) {
-	cl := make(chan fileTransferResult)
-	go fileResultLogger(cl)
-	var wg sync.WaitGroup
-	projectRoot := projectURI.Hostname()
-
-	outputInfo("Trying ", targetURL)
-	res, err := client.Get(targetURL + "/.git/index")
+	outputInfo("Trying ", projectRoot)
+	res, err := gs.client.Get(target.String() + "/.git/index")
 	if err != nil {
 		outputError(err)
 		return
@@ -88,35 +72,160 @@ func ripGit(client *http.Client, targetURL string, projectURI url.URL) {
 		return
 	}
 
-	outputInfo("Building ", projectURI.Hostname())
+	outputInfo("Building ", projectRoot)
 	os.MkdirAll(projectRoot, os.ModePerm)
 
-	entryStartByteOffset := 12
-	indexedEntries := binary.BigEndian.Uint32(indexFile[8:entryStartByteOffset])
-	entryBytePointer := 12
-	entryByteOffsetToSha := 40
-	shaLen := 20
+	var (
+		entryStartByteOffset = 12
+		indexedEntries       = binary.BigEndian.Uint32(indexFile[8:entryStartByteOffset])
+		entryBytePointer     = 12
+		entryByteOffsetToSha = 40
+		shaLen               = 20
+	)
 	for i := 0; i < int(indexedEntries); i++ {
-		startOfShaOffset := (entryBytePointer) + (entryByteOffsetToSha)
-		endOfShaOffset := startOfShaOffset + shaLen
-		flagIndexStart := endOfShaOffset
-		flagIndexEnd := flagIndexStart + 2
-		startFileIndex := flagIndexEnd
-
-		sha := hex.EncodeToString(indexFile[startOfShaOffset:endOfShaOffset])
-		nullIndex := bytes.Index(indexFile[startFileIndex:], []byte("\000"))
-		fileName := indexFile[startFileIndex : startFileIndex+nullIndex]
-
-		remoteFile := targetURL + "/.git/objects/" + sha[0:2] + "/" + sha[2:]
-
-		entryLen := ((startFileIndex + len(fileName)) - entryBytePointer)
-		entryByted := entryLen + (8 - (entryLen % 8))
+		var (
+			startOfShaOffset = (entryBytePointer) + (entryByteOffsetToSha)
+			endOfShaOffset   = startOfShaOffset + shaLen
+			flagIndexStart   = endOfShaOffset
+			flagIndexEnd     = flagIndexStart + 2
+			startFileIndex   = flagIndexEnd
+			sha              = hex.EncodeToString(indexFile[startOfShaOffset:endOfShaOffset])
+			nullIndex        = bytes.Index(indexFile[startFileIndex:], []byte("\000"))
+			fileName         = indexFile[startFileIndex : startFileIndex+nullIndex]
+			remoteFile       = target.String() + "/.git/objects/" + sha[0:2] + "/" + sha[2:]
+			entryLen         = ((startFileIndex + len(fileName)) - entryBytePointer)
+			entryByted       = entryLen + (8 - (entryLen % 8))
+		)
 		entryBytePointer += entryByted
 
-		wg.Add(1)
-		go getAndPersistFile(&wg, cl, client, remoteFile, projectRoot+"/"+string(fileName))
+		gs.waitGroup.Add(1)
+		go gs.getAndPersist(remoteFile, target.Hostname()+"/"+string(fileName))
 	}
-	wg.Wait()
+	gs.waitGroup.Wait()
+}
+
+func (gs *gitScraper) getAndPersist(remoteURI string, filePath string) {
+	res, err := gs.client.Get(remoteURI)
+	r := fileTransferResult{}
+	if err != nil {
+		r.Err = err
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " : Could not retrieve : " + filePath)
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+
+	objectFile, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		r.Err = err
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+	if res.StatusCode != http.StatusOK {
+		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " Could not read :" + filePath)
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+
+	br := bytes.NewReader(objectFile)
+	zr, err := zlib.NewReader(br)
+	if err != nil {
+		r.Err = err
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+
+	b, err := ioutil.ReadAll(zr)
+	if err != nil {
+		r.Err = err
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+
+	nullIndex := bytes.Index(b, []byte("\000"))
+	err = gs.createPathToFile(filePath)
+	if err != nil {
+		r.Err = err
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+	err = ioutil.WriteFile(string(filePath), b[nullIndex:], os.ModePerm)
+	if err != nil {
+		r.Err = err
+		*gs.resultLogger <- r
+		gs.waitGroup.Done()
+		return
+	}
+
+	r.LocalFile = filePath
+	*gs.resultLogger <- r
+	gs.waitGroup.Done()
+}
+
+func (gs *gitScraper) createPathToFile(filePath string) error {
+	p := path.Dir(filePath)
+	if p == "." {
+		return nil
+	}
+
+	return os.MkdirAll(p, os.ModePerm)
+}
+
+// https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
+func main() {
+	var (
+		proxyURI, targetURL, maxIdleConn, maxIdleTime = setupFlags()
+		transport                                     = newClientTransport(maxIdleConn, maxIdleTime)
+		client, err                                   = newClient(transport, proxyURI)
+		resultLoggerChan                              = make(chan fileTransferResult)
+		scraper                                       = newGitScraper(client, &resultLoggerChan)
+	)
+
+	if proxyURI != "" {
+		outputInfo("SOCK5 Proxy set on ", proxyURI)
+	}
+
+	go fileResultLogger(resultLoggerChan)
+
+	if err != nil {
+		outputError(err, "Failed to setup client")
+		return
+	}
+
+	projectURI, err := url.ParseRequestURI(targetURL)
+	if err != nil {
+		if len(targetURL) == 0 {
+			outputError(err, "URL is empty. Set one with -u")
+			return
+		}
+		outputError(errors.New("Invalid URL"), targetURL)
+		return
+	}
+
+	scraper.scrapeURL(projectURI)
+}
+
+func fileResultLogger(c chan (fileTransferResult)) {
+	for {
+		r := <-c
+		if r.Err != nil {
+			outputFileSkipped(r.Err, r.LocalFile)
+		} else {
+			outputFileAdded(r.LocalFile)
+		}
+	}
 }
 
 func setupFlags() (proxyURI string, targetURL string, maxIdleConn int, maxIdleTime int) {
@@ -159,7 +268,7 @@ func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, err
 	if err != nil {
 		return nil, errors.New("Proxy not ready : " + err.Error())
 	}
-	tbProxyURL, err := url.Parse("socks5://127.0.0.1:9150")
+	tbProxyURL, err := url.Parse("socks5://" + proxyURI)
 	if err != nil {
 		return nil, errors.New("Failed to parse proxy URL: " + err.Error())
 	}
@@ -176,6 +285,12 @@ func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, err
 	return &http.Client{Transport: tbTransport}, nil
 }
 
+// getHTTP
+func getHTTP(transport *http.Transport) (*http.Client, error) {
+	return &http.Client{Transport: transport}, nil
+}
+
+// TODO put together in a struct, maybe splice it with the logger chan
 func outputError(err error, s ...string) {
 	log.Fatalln(fmt.Sprintf("Error : %v (%s)", s, err))
 }
@@ -190,76 +305,4 @@ func outputFileAdded(s ...string) {
 
 func outputFileSkipped(err error, s ...string) {
 	log.Println(fmt.Sprintf("- Skipped %v (%s)", s, err))
-}
-
-// getHTTP
-func getHTTP(transport *http.Transport) (*http.Client, error) {
-	return &http.Client{Transport: transport}, nil
-}
-
-func getAndPersistFile(wg *sync.WaitGroup, cl chan (fileTransferResult), client *http.Client, remoteFile string, filePath string) {
-	res, err := client.Get(remoteFile)
-	r := fileTransferResult{}
-	if err != nil {
-		r.Err = err
-		cl <- r
-		wg.Done()
-		return
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " : Could not retrieve : " + remoteFile)
-		cl <- r
-		wg.Done()
-		return
-	}
-
-	objectFile, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		r.Err = err
-		cl <- r
-		wg.Done()
-		return
-	}
-	if res.StatusCode != http.StatusOK {
-		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " Could not read :" + remoteFile)
-		cl <- r
-		wg.Done()
-		return
-	}
-
-	br := bytes.NewReader(objectFile)
-	zr, err := zlib.NewReader(br)
-	if err != nil {
-		r.Err = err
-		cl <- r
-		wg.Done()
-		return
-	}
-
-	b, err := ioutil.ReadAll(zr)
-	if err != nil {
-		r.Err = err
-		wg.Done()
-		cl <- r
-		return
-	}
-
-	nullIndex := bytes.Index(b, []byte("\000"))
-	createPathFromFilePath(filePath)
-	ioutil.WriteFile(string(filePath), b[nullIndex:], os.ModePerm)
-
-	r.LocalFile = remoteFile
-	cl <- r
-	wg.Done()
-}
-
-func createPathFromFilePath(filePath string) {
-	p := path.Dir(filePath)
-	if p == "." {
-		return
-	}
-
-	os.MkdirAll(p, os.ModePerm)
 }
