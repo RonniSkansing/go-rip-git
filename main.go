@@ -1,10 +1,3 @@
-// TODO tefactor 3x
-// TODO improve output format
-// TODO verbosity flag
-// TODO help command
-// TODO banner
-// TODO wishlist:  throttle
-
 package main
 
 import (
