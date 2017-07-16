@@ -21,7 +21,7 @@ func main() {
 	)
 
 	if proxyURI != "" {
-		lr.Info("SOCK5 Proxy set on ", proxyURI)
+		lr.Info("SOCK5 Proxy set on " + proxyURI)
 	}
 
 	if err != nil {

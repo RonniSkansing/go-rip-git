@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -36,10 +37,10 @@ func NewGitScraper(client *http.Client, logger *logger.Logger) *GitScraper {
 func (gs *GitScraper) ScrapeURL(target *url.URL) {
 	projectRoot := target.Hostname()
 
-	gs.logger.Info("Trying ", projectRoot)
+	gs.logger.Info("Trying " + projectRoot)
 	res, err := gs.client.Get(target.String() + "/.git/index")
 	if err != nil {
-		gs.logger.Error(err)
+		gs.logger.Error(err, "Failed to get git index")
 		return
 	}
 	defer res.Body.Close()
@@ -55,7 +56,7 @@ func (gs *GitScraper) ScrapeURL(target *url.URL) {
 		return
 	}
 
-	gs.logger.Info("Building ", projectRoot)
+	gs.logger.Info("Building " + projectRoot)
 	os.MkdirAll(projectRoot, os.ModePerm)
 
 	var (
@@ -90,26 +91,28 @@ func (gs *GitScraper) ScrapeURL(target *url.URL) {
 func (gs *GitScraper) getAndPersist(remoteURI string, filePath string) {
 	res, err := gs.client.Get(remoteURI)
 	if err != nil {
-		gs.logger.FileSkipped(err, remoteURI)
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		gs.logger.FileSkipped(err, strconv.Itoa(res.StatusCode)+" : Could not retrieve : "+filePath)
+		err = errors.New(strconv.Itoa(res.StatusCode) + " " + filePath)
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 
 	objectFile, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		gs.logger.FileSkipped(err, "")
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 	if res.StatusCode != http.StatusOK {
-		gs.logger.FileSkipped(err, strconv.Itoa(res.StatusCode)+" Could not read :"+filePath)
+		err = errors.New(strconv.Itoa(res.StatusCode) + " " + filePath)
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
@@ -117,14 +120,14 @@ func (gs *GitScraper) getAndPersist(remoteURI string, filePath string) {
 	br := bytes.NewReader(objectFile)
 	zr, err := zlib.NewReader(br)
 	if err != nil {
-		gs.logger.FileSkipped(err, "")
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 
 	b, err := ioutil.ReadAll(zr)
 	if err != nil {
-		gs.logger.FileSkipped(err, "")
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
@@ -132,13 +135,13 @@ func (gs *GitScraper) getAndPersist(remoteURI string, filePath string) {
 	nullIndex := bytes.Index(b, []byte("\000"))
 	err = gs.createPathToFile(filePath)
 	if err != nil {
-		gs.logger.FileSkipped(err, "")
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 	err = ioutil.WriteFile(string(filePath), b[nullIndex:], os.ModePerm)
 	if err != nil {
-		gs.logger.FileSkipped(err, "")
+		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}

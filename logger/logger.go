@@ -1,5 +1,3 @@
-// TODO: Fix logging output its messed up
-
 package logger
 
 import (
@@ -11,22 +9,21 @@ import (
 type Logger struct{}
 
 // Error log a error
-func (lr *Logger) Error(err error, s ...string) {
-	log.Fatalln(fmt.Sprintf("Error : %v (%s)", s, err))
+func (lr *Logger) Error(err error, s string) {
+	log.Fatalln(fmt.Sprintf("Error : %s (%s)", s, err))
 }
 
 // Info log info
-func (lr *Logger) Info(s ...string) {
-	log.Println(fmt.Sprintf("Info : %v", s))
-
+func (lr *Logger) Info(s string) {
+	log.Println(fmt.Sprintf("Info : %s", s))
 }
 
 // FileAdded log file added
-func (lr *Logger) FileAdded(s ...string) {
-	log.Println(fmt.Sprintf("+ Added %v", s))
+func (lr *Logger) FileAdded(s string) {
+	log.Println(fmt.Sprintf("+ Added (%s)", s))
 }
 
 // FileSkipped log file skipped
-func (lr *Logger) FileSkipped(err error, s ...string) {
-	log.Println(fmt.Sprintf("- Skipped %v (%s)", s, err))
+func (lr *Logger) FileSkipped(err error) {
+	log.Println(fmt.Sprintf("- Skipped (%s)", err))
 }
