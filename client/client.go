@@ -11,16 +11,16 @@ import (
 )
 
 // NewClient factory for *http.Client
-func NewClient(transport *http.Transport, proxyFlag string) (*http.Client, error) {
+func NewClient(transport *http.Transport, proxyFlag string, timeout int) (*http.Client, error) {
 	if proxyFlag != "" {
 		return getProxyHTTP(proxyFlag, transport)
 	}
 
-	return getHTTP(transport)
+	return getHTTP(transport, timeout)
 }
 
-func getHTTP(transport *http.Transport) (*http.Client, error) {
-	return &http.Client{Transport: transport}, nil
+func getHTTP(transport *http.Transport, timeout int) (*http.Client, error) {
+	return &http.Client{Transport: transport, Timeout: time.Duration(timeout) * time.Second}, nil
 }
 
 func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, error) {
@@ -54,9 +54,8 @@ func testDialProxyReady(proxyURI string) (err error) {
 }
 
 // NewClientTransport factory for *http.Transport
-func NewClientTransport(maxIdleConns int, maxIdleTime int) *http.Transport {
+func NewClientTransport(maxIdleConns int) *http.Transport {
 	return &http.Transport{
-		MaxIdleConns:    maxIdleConns,
-		IdleConnTimeout: time.Duration(maxIdleTime) * time.Second,
+		MaxIdleConns: maxIdleConns,
 	}
 }

@@ -9,8 +9,12 @@ Use at your own own risk.
 
 
 # Install and build
-First get and build it
+Get it
+
 `go get github.com/ronnieskansing/gorgit`
+
+Build it
+
 `go build`
 
 # Usage
