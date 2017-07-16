@@ -7,9 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"flag"
-	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,6 +16,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/ronnieskansing/gorgit/logger"
 
 	"golang.org/x/net/proxy"
 )
@@ -28,16 +28,16 @@ type fileTransferResult struct {
 }
 
 type gitScraper struct {
-	client       *http.Client
-	resultLogger *chan (fileTransferResult)
-	waitGroup    *sync.WaitGroup
+	client    *http.Client
+	logger    *logger.Logger
+	waitGroup *sync.WaitGroup
 }
 
-func newGitScraper(client *http.Client, resultLogger *chan (fileTransferResult)) *gitScraper {
+func newGitScraper(client *http.Client, logger *logger.Logger) *gitScraper {
 	return &gitScraper{
-		client:       client,
-		resultLogger: resultLogger,
-		waitGroup:    &sync.WaitGroup{},
+		client:    client,
+		logger:    logger,
+		waitGroup: &sync.WaitGroup{},
 	}
 }
 
@@ -46,26 +46,26 @@ func (gs *gitScraper) scrapeURL(target *url.URL) {
 		projectRoot = target.Hostname()
 	)
 
-	outputInfo("Trying ", projectRoot)
+	gs.logger.Info("Trying ", projectRoot)
 	res, err := gs.client.Get(target.String() + "/.git/index")
 	if err != nil {
-		outputError(err)
+		gs.logger.Error(err)
 		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		outputError(err, "Invalid response code")
+		gs.logger.Error(err, "Invalid response code")
 		return
 	}
 
 	indexFile, err := ioutil.ReadAll(res.Body)
 	if res.StatusCode != http.StatusOK {
-		outputError(err, "Invalid response code for index file")
+		gs.logger.Error(err, "Invalid response code for index file")
 		return
 	}
 
-	outputInfo("Building ", projectRoot)
+	gs.logger.Info("Building ", projectRoot)
 	os.MkdirAll(projectRoot, os.ModePerm)
 
 	var (
@@ -99,32 +99,27 @@ func (gs *gitScraper) scrapeURL(target *url.URL) {
 
 func (gs *gitScraper) getAndPersist(remoteURI string, filePath string) {
 	res, err := gs.client.Get(remoteURI)
-	r := fileTransferResult{}
 	if err != nil {
-		r.Err = err
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, remoteURI)
 		gs.waitGroup.Done()
 		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " : Could not retrieve : " + filePath)
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, strconv.Itoa(res.StatusCode)+" : Could not retrieve : "+filePath)
 		gs.waitGroup.Done()
 		return
 	}
 
 	objectFile, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		r.Err = err
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, "")
 		gs.waitGroup.Done()
 		return
 	}
 	if res.StatusCode != http.StatusOK {
-		r.Err = errors.New(strconv.Itoa(res.StatusCode) + " Could not read :" + filePath)
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, strconv.Itoa(res.StatusCode)+" Could not read :"+filePath)
 		gs.waitGroup.Done()
 		return
 	}
@@ -132,16 +127,14 @@ func (gs *gitScraper) getAndPersist(remoteURI string, filePath string) {
 	br := bytes.NewReader(objectFile)
 	zr, err := zlib.NewReader(br)
 	if err != nil {
-		r.Err = err
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, "")
 		gs.waitGroup.Done()
 		return
 	}
 
 	b, err := ioutil.ReadAll(zr)
 	if err != nil {
-		r.Err = err
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, "")
 		gs.waitGroup.Done()
 		return
 	}
@@ -149,21 +142,18 @@ func (gs *gitScraper) getAndPersist(remoteURI string, filePath string) {
 	nullIndex := bytes.Index(b, []byte("\000"))
 	err = gs.createPathToFile(filePath)
 	if err != nil {
-		r.Err = err
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, "")
 		gs.waitGroup.Done()
 		return
 	}
 	err = ioutil.WriteFile(string(filePath), b[nullIndex:], os.ModePerm)
 	if err != nil {
-		r.Err = err
-		*gs.resultLogger <- r
+		gs.logger.FileSkipped(err, "")
 		gs.waitGroup.Done()
 		return
 	}
 
-	r.LocalFile = filePath
-	*gs.resultLogger <- r
+	gs.logger.FileAdded(filePath)
 	gs.waitGroup.Done()
 }
 
@@ -182,43 +172,30 @@ func main() {
 		proxyURI, targetURL, maxIdleConn, maxIdleTime = setupFlags()
 		transport                                     = newClientTransport(maxIdleConn, maxIdleTime)
 		client, err                                   = newClient(transport, proxyURI)
-		resultLoggerChan                              = make(chan fileTransferResult)
-		scraper                                       = newGitScraper(client, &resultLoggerChan)
+		lr                                            = logger.Logger{}
+		scraper                                       = newGitScraper(client, &lr)
 	)
 
 	if proxyURI != "" {
-		outputInfo("SOCK5 Proxy set on ", proxyURI)
+		lr.Info("SOCK5 Proxy set on ", proxyURI)
 	}
 
-	go fileResultLogger(resultLoggerChan)
-
 	if err != nil {
-		outputError(err, "Failed to setup client")
+		lr.Error(err, "Failed to setup client")
 		return
 	}
 
 	projectURI, err := url.ParseRequestURI(targetURL)
 	if err != nil {
 		if len(targetURL) == 0 {
-			outputError(err, "URL is empty. Set one with -u")
+			lr.Error(err, "URL is empty. Set one with -u")
 			return
 		}
-		outputError(errors.New("Invalid URL"), targetURL)
+		lr.Error(errors.New("Invalid URL"), targetURL)
 		return
 	}
 
 	scraper.scrapeURL(projectURI)
-}
-
-func fileResultLogger(c chan (fileTransferResult)) {
-	for {
-		r := <-c
-		if r.Err != nil {
-			outputFileSkipped(r.Err, r.LocalFile)
-		} else {
-			outputFileAdded(r.LocalFile)
-		}
-	}
 }
 
 func setupFlags() (proxyURI string, targetURL string, maxIdleConn int, maxIdleTime int) {
@@ -281,21 +258,4 @@ func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, err
 // getHTTP
 func getHTTP(transport *http.Transport) (*http.Client, error) {
 	return &http.Client{Transport: transport}, nil
-}
-
-// TODO put together in a struct, maybe splice it with the logger chan
-func outputError(err error, s ...string) {
-	log.Fatalln(fmt.Sprintf("Error : %v (%s)", s, err))
-}
-
-func outputInfo(s ...string) {
-	log.Println(fmt.Sprintf("Info : %v", s))
-}
-
-func outputFileAdded(s ...string) {
-	log.Println(fmt.Sprintf("+ Added %v", s))
-}
-
-func outputFileSkipped(err error, s ...string) {
-	log.Println(fmt.Sprintf("- Skipped %v (%s)", s, err))
 }
