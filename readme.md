@@ -18,7 +18,7 @@ First get and build it
 `go build`
 
 # Usage
-- Test and show files
+### Show files
 `gorgit -u http://target.tld`
 
 Results in something like
@@ -28,12 +28,13 @@ c1f3161c27b7fb86615a4916f595473a0a76c774 .env
 ...
 ```
 
-- Use a sock5 proxy
+## Use a SOCKS5 proxy
 `gorgit -u http://target.tld -p 127.0.0.1:9150`
 
-- Scrape files
-**Warning** *This fires up 1 request for each file without any throttle and copies potentially private source code.*
+## Scrape files
 `gorgit -u http://target.tld -s true`
+
+**Warning** *This fires up 1 request for each file without any throttle and copies potentially private source code.*
 
 Scraped source is found in `target.tld/...``
 
