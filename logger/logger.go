@@ -1,3 +1,5 @@
+// TODO: Fix logging output its messed up
+
 package logger
 
 import (
