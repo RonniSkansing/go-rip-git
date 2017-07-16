@@ -1,16 +1,12 @@
-# In development
-
-Rewritting but works for testing/demo a POC by building the binary.
-
 # Description
+When deploying it is important to remove or cut off access to /.git folder
 
-*EXPECTED OUTPUT*
-Application that scans one or a collection of targets (urls), looks for left over git data and either converts the file objects to files locally or displays a list of them
+This program is used to extract information and pull the remote files locally.
 
-This is a security tool use at own risk
+Use responsibly - Do no use on targets without prior permission. Also take when scraping the remote files, depending on the size of the repo, you might fire off more requests faster then you expect.
 
-*ACTUAL OUTPUT*
-Application that scans a target and either displays the file content of git index or scrapes it down locally
+Use at your own own risk.
+
 
 # Install and build
 First get and build it
@@ -39,6 +35,12 @@ c1f3161c27b7fb86615a4916f595473a0a76c774 .env
 Scraped source is found in `target.tld/...``
 
 # Developer notes
-~~Pull requests with features, fixes and refactoring are appreciated~~
+Pull requests with features, fixes and refactoring are appreciated
+
+Things that come into mind
+- Tests
+- Accepting a list of targets (from arg and file)
+- Throttle control
+- Setting of verbosity level
 
 Found a **bug**? Create a issue
