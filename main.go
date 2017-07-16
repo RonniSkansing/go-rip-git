@@ -3,25 +3,21 @@ package main
 import (
 	"errors"
 	"flag"
-	"net"
-	"net/http"
 	"net/url"
-	"time"
 
+	"github.com/ronnieskansing/gorgit/client"
 	"github.com/ronnieskansing/gorgit/logger"
 	"github.com/ronnieskansing/gorgit/scraper"
-
-	"golang.org/x/net/proxy"
 )
 
 // https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
 func main() {
 	var (
 		proxyURI, targetURL, maxIdleConn, maxIdleTime = setupFlags()
-		transport                                     = newClientTransport(maxIdleConn, maxIdleTime)
-		client, err                                   = newClient(transport, proxyURI)
+		transport                                     = client.NewClientTransport(maxIdleConn, maxIdleTime)
+		cl, err                                       = client.NewClient(transport, proxyURI)
 		lr                                            = logger.Logger{}
-		sr                                            = scraper.NewGitScraper(client, &lr)
+		sr                                            = scraper.NewGitScraper(cl, &lr)
 	)
 
 	if proxyURI != "" {
@@ -56,54 +52,4 @@ func setupFlags() (proxyURI string, targetURL string, maxIdleConn int, maxIdleTi
 	flag.Parse()
 
 	return *proxyFlag, *urlFlag, *maxIdleConnFlag, *maxIdleTimeFlag
-}
-
-func newClientTransport(maxIdleConns int, maxIdleTime int) *http.Transport {
-	return &http.Transport{
-		MaxIdleConns:    maxIdleConns,
-		IdleConnTimeout: time.Duration(maxIdleTime) * time.Second,
-	}
-}
-
-func newClient(transport *http.Transport, proxyFlag string) (*http.Client, error) {
-	if proxyFlag != "" {
-		return getProxyHTTP(proxyFlag, transport)
-	}
-
-	return getHTTP(transport)
-}
-
-func testDialProxyReady(proxyURI string) (err error) {
-	conn, err := net.Dial("tcp", proxyURI)
-	if conn != nil {
-		conn.Close()
-	}
-	return
-}
-
-func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, error) {
-	err := testDialProxyReady(proxyURI)
-	if err != nil {
-		return nil, errors.New("Proxy not ready : " + err.Error())
-	}
-	tbProxyURL, err := url.Parse("socks5://" + proxyURI)
-	if err != nil {
-		return nil, errors.New("Failed to parse proxy URL: " + err.Error())
-	}
-	tbDialer, err := proxy.FromURL(tbProxyURL, proxy.Direct)
-	if err != nil {
-		return nil, errors.New("Failed to obtain proxy dialer: " + err.Error())
-	}
-	tbTransport := &http.Transport{
-		Dial:                tbDialer.Dial,
-		MaxIdleConns:        transport.MaxIdleConns,
-		MaxIdleConnsPerHost: transport.MaxIdleConns,
-	}
-
-	return &http.Client{Transport: tbTransport}, nil
-}
-
-// getHTTP
-func getHTTP(transport *http.Transport) (*http.Client, error) {
-	return &http.Client{Transport: transport}, nil
 }
