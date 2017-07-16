@@ -1,6 +1,6 @@
 # In development
 
-Rewritting but works for testing/demostrating a POC via building the binary.
+Rewritting but works for testing/demo a POC by building the binary.
 
 # Description
 
