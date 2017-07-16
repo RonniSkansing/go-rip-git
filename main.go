@@ -22,11 +22,6 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-type fileTransferResult struct {
-	Err       error
-	LocalFile string
-}
-
 type gitScraper struct {
 	client    *http.Client
 	logger    *logger.Logger
