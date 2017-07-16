@@ -10,7 +10,7 @@ Application that scans one or a collection of targets (urls), looks for left ove
 This is a security tool use at own risk
 
 *ACTUAL OUTPUT*
-Application that scans a target and converts the git data as represented in index 1-1 to source files locally
+Application that scans a target and either displays the file content of git index or scrapes it down locally
 
 # Install and build
 First get and build it
@@ -18,15 +18,26 @@ First get and build it
 `go build`
 
 # Usage
-- Test and scrape
-`PROJECTNAME -u http://target.tld`
-Scraped source is saved at `target.tld/...`
+- Test and show files
+`gorgit -u http://target.tld`
 
+Results in something like
+```
+c1f3161c27b7fb86615a4916f595473a0a76c774 .env
+29c16c3f37ea57569fbf9cc1ce183938a9710aed config/config.json
+...
+```
 
 - Use a sock5 proxy
-`PROJECTNAME -u http://target.tld -p 127.0.0.1:9150`
+`gorgit -u http://target.tld -p 127.0.0.1:9150`
 
-...
+- Scrape files
+**Warning** *This fires up 1 request for each file without any throttle and copies potentially private source code.*
+`gorgit -u http://target.tld -s true`
+
+Scraped source is found in `target.tld/...``
 
 # Developer notes
 ~~Pull requests with features, fixes and refactoring are appreciated~~
+
+Found a **bug**? Create a issue

@@ -18,6 +18,11 @@ func (lr *Logger) Info(s string) {
 	log.Println(fmt.Sprintf("Info : %s", s))
 }
 
+// Entry logs entry
+func (lr *Logger) Entry(s string) {
+	fmt.Println(s)
+}
+
 // FileAdded log file added
 func (lr *Logger) FileAdded(s string) {
 	log.Println(fmt.Sprintf("+ Added (%s)", s))

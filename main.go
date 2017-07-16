@@ -1,3 +1,5 @@
+// TODO: Add verbosity levels
+
 package main
 
 import (
@@ -13,11 +15,11 @@ import (
 // https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
 func main() {
 	var (
-		proxyURI, targetURL, maxIdleConn, maxIdleTime = setupFlags()
-		transport                                     = client.NewClientTransport(maxIdleConn, maxIdleTime)
-		cl, err                                       = client.NewClient(transport, proxyURI)
-		lr                                            = logger.Logger{}
-		sr                                            = scraper.NewGitScraper(cl, &lr)
+		proxyURI, targetURL, shouldScrape, maxIdleConn, maxIdleTime = setupFlags()
+		transport                                                   = client.NewClientTransport(maxIdleConn, maxIdleTime)
+		cl, err                                                     = client.NewClient(transport, proxyURI)
+		lr                                                          = logger.Logger{}
+		sr                                                          = scraper.NewGitScraper(cl, &lr)
 	)
 
 	if proxyURI != "" {
@@ -39,17 +41,22 @@ func main() {
 		return
 	}
 
-	sr.ScrapeURL(projectURI)
+	if shouldScrape {
+		sr.Scrape(projectURI)
+	} else {
+		sr.ShowFiles(projectURI)
+	}
 }
 
-func setupFlags() (proxyURI string, targetURL string, maxIdleConn int, maxIdleTime int) {
+func setupFlags() (proxyURI string, targetURL string, scrapeFlag bool, maxIdleConn int, maxIdleTime int) {
 	var (
-		proxyFlag       = flag.String("p", "", "Proxy URI to use, ex. -p \"127.0.0.1:9150\"")
-		urlFlag         = flag.String("u", "", "URL to scan")
-		maxIdleConnFlag = flag.Int("c", 10, "Number of concurrent requests")
-		maxIdleTimeFlag = flag.Int("i", 5, "Max time in seconds a connection can be idle before timeout")
+		proxyFlag        = flag.String("p", "", "Proxy URI to use, ex. -p \"127.0.0.1:9150\"")
+		urlFlag          = flag.String("u", "", "URL to scan")
+		shouldScrapeFlag = flag.Bool("s", false, "Should the source be scraped?")
+		maxIdleConnFlag  = flag.Int("c", 10, "Number of concurrent requests")
+		maxIdleTimeFlag  = flag.Int("i", 5, "Max time in seconds a connection can be idle before timeout")
 	)
 	flag.Parse()
 
-	return *proxyFlag, *urlFlag, *maxIdleConnFlag, *maxIdleTimeFlag
+	return *proxyFlag, *urlFlag, *shouldScrapeFlag, *maxIdleConnFlag, *maxIdleTimeFlag
 }
