@@ -47,4 +47,4 @@ Things that come into mind
 - Throttle control
 - Setting of verbosity level
 
-Found a **bug**? Create a issue
+Found a **bug**? Create an issue
