@@ -7,56 +7,57 @@ import (
 	"flag"
 	"net/url"
 
-	"github.com/ronnieskansing/gorgit/client"
-	"github.com/ronnieskansing/gorgit/logger"
-	"github.com/ronnieskansing/gorgit/scraper"
+	"github.com/RonnieSkansing/gorgit/client"
+	"github.com/RonnieSkansing/gorgit/logger"
+	"github.com/RonnieSkansing/gorgit/scraper"
 )
 
-// https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
 func main() {
+	f := struct {
+		proxy            *string
+		url              *string
+		scrape           *bool
+		reqMaxConcurrent *int
+		reqTimeout       *int
+	}{
+		proxy:            flag.String("p", "", "Proxy URI to use, ex. -p \"127.0.0.1:9150\""),
+		url:              flag.String("u", "", "URL to scan"),
+		scrape:           flag.Bool("s", false, "Should the source be scraped?"),
+		reqMaxConcurrent: flag.Int("c", 10, "Number of concurrent requests"),
+		reqTimeout:       flag.Int("t", 5, "Max time in seconds before request timeout"),
+	}
+
 	var (
-		proxyURI, targetURL, shouldScrape, maxIdleConn, reqTimeout = setupFlags()
-		transport                                                  = client.NewClientTransport(maxIdleConn)
-		cl, err                                                    = client.NewClient(transport, proxyURI, reqTimeout)
-		lr                                                         = logger.Logger{}
-		sr                                                         = scraper.NewGitScraper(cl, &lr)
+		transport = client.NewClientTransport(*f.reqMaxConcurrent)
+		cl, err   = client.NewClient(transport, *f.proxy, *f.reqTimeout)
+		log       = logger.Logger{}
+		sr        = scraper.NewScraper(cl, &log)
 	)
 
-	if proxyURI != "" {
-		lr.Info("SOCK5 Proxy set on " + proxyURI)
+	if *f.proxy != "" {
+		log.Info("SOCK5 Proxy set on " + *f.proxy)
 	}
 
 	if err != nil {
-		lr.Error(err, "Failed to setup client")
+		log.Error(err, "Failed to setup client")
 		return
 	}
 
-	projectURI, err := url.ParseRequestURI(targetURL)
+	uri, err := url.ParseRequestURI(*f.url)
 	if err != nil {
-		if len(targetURL) == 0 {
-			lr.Error(err, "URL is empty. Set one with -u")
+		if len(*f.url) == 0 {
+			log.Error(err, "URL is empty. Set one with -u")
 			return
 		}
-		lr.Error(errors.New("Invalid URL"), targetURL)
+		log.Error(errors.New("Invalid URL"), *f.url)
 		return
 	}
 
-	if shouldScrape {
-		sr.Scrape(projectURI)
+
+
+	if *f.scrape {
+		sr.Scrape(uri)
 	} else {
-		sr.ShowFiles(projectURI)
+		sr.ShowFiles(uri)
 	}
-}
-
-func setupFlags() (proxyURI string, targetURL string, scrapeFlag bool, maxIdleConn int, requestTimeout int) {
-	var (
-		proxyFlag        = flag.String("p", "", "Proxy URI to use, ex. -p \"127.0.0.1:9150\"")
-		urlFlag          = flag.String("u", "", "URL to scan")
-		shouldScrapeFlag = flag.Bool("s", false, "Should the source be scraped?")
-		maxIdleConnFlag  = flag.Int("c", 10, "Number of concurrent requests")
-		timeout          = flag.Int("t", 5, "Max time in seconds before request timeout")
-	)
-	flag.Parse()
-
-	return *proxyFlag, *urlFlag, *shouldScrapeFlag, *maxIdleConnFlag, *timeout
 }

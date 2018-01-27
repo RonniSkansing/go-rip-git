@@ -14,120 +14,123 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/ronnieskansing/gorgit/logger"
+	"github.com/RonnieSkansing/gorgit/logger"
+	"path/filepath"
 )
 
-// GitScraper Scrapes git
-type GitScraper struct {
+var gitPath = "/.git"
+var gitIdxFilePath = gitPath + "/index"
+var gitObjPath = gitPath + "/objects"
+// foo
+// Scraper Scrapes git
+type Scraper struct {
 	client    *http.Client
 	logger    *logger.Logger
 	waitGroup *sync.WaitGroup
 }
 
-type indexEntry struct {
+type idxEntry struct {
 	sha      string
 	filename string
 }
 
-// NewGitScraper Creates a new scraper instance pointer
-func NewGitScraper(client *http.Client, logger *logger.Logger) *GitScraper {
-	return &GitScraper{
+// NewScraper Creates a new scraper instance and returns a pointer to it
+func NewScraper(client *http.Client, logger *logger.Logger) *Scraper {
+	return &Scraper{
 		client:    client,
 		logger:    logger,
 		waitGroup: &sync.WaitGroup{},
 	}
 }
 
-func (gs *GitScraper) getIndexFile(target *url.URL) ([]byte, error) {
-	res, err := gs.client.Get(target.String() + "/.git/index")
+// GetIdx retrieves the git index file and returns it as an byte slice
+func (gs *Scraper) GetIdx(target *url.URL) (idxFile []byte, err error) {
+	res, err := gs.client.Get(target.String() + gitIdxFilePath)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return nil, err
+		return
 	}
 
-	indexFile, err := ioutil.ReadAll(res.Body)
-	if res.StatusCode != http.StatusOK {
-		return nil, err
-	}
-
-	return indexFile, nil
+	return ioutil.ReadAll(res.Body)
 }
 
 // ShowFiles shows each file from index
-func (gs *GitScraper) ShowFiles(target *url.URL) {
-	projectRoot := target.Hostname()
-	indexFile, err := gs.getIndexFile(target)
+func (gs *Scraper) ShowFiles(target *url.URL) {
+	h := target.Hostname()
+	idxFile, err := gs.GetIdx(target)
 	if err != nil {
 		gs.logger.Error(err, "Failed to get index of "+target.Hostname())
 		return
 	}
 
-	gs.logger.Info("Contents of " + projectRoot)
-	entries := gs.parse(indexFile)
+	gs.logger.Info("Contents of " + h)
+	entries := gs.parse(idxFile)
 	for i := 0; i < len(entries); i++ {
 		gs.logger.Entry(entries[i].sha + " " + entries[i].filename)
 	}
 }
 
 // Scrape parses remote git index and converts each listed file to source locally
-func (gs *GitScraper) Scrape(target *url.URL) {
-	projectRoot := target.Hostname()
-	indexFile, err := gs.getIndexFile(target)
+func (gs *Scraper) Scrape(target *url.URL) {
+	h := target.Hostname()
+	idxFile, err := gs.GetIdx(target)
 	if err != nil {
 		gs.logger.Error(err, "Failed to get index of "+target.Hostname())
 		return
 	}
-	gs.logger.Info("Building " + projectRoot)
-	os.MkdirAll(projectRoot, os.ModePerm)
+	gs.logger.Info("Building " + h)
+	os.MkdirAll(h, os.ModePerm)
 
-	entries := gs.parse(indexFile)
+	entries := gs.parse(idxFile)
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
-		remoteFile := target.String() + "/.git/objects/" + entry.sha[0:2] + "/" + entry.sha[2:]
+		remoteFile := target.String() + gitObjPath + "/" + entry.sha[0:2] + "/" + entry.sha[2:]
 		gs.waitGroup.Add(1)
-		go gs.getAndPersist(remoteFile, target.Hostname()+"/"+string(entry.filename))
+		go gs.getAndPersist(remoteFile, filepath.Join(target.Hostname(), string(entry.filename)))
 	}
 
 	gs.waitGroup.Wait()
-	gs.logger.Info("Finished " + projectRoot)
+	gs.logger.Info("Finished " + h)
 }
 
-// Parse get the indexEntry of the git index file
-func (gs *GitScraper) parse(rawGitIndex []byte) (r []*indexEntry) {
+// Parse get the idxEntry of the git index file
+// https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
+func (gs *Scraper) parse(gitIdxBody []byte) []*idxEntry {
 	var (
 		entryStartByteOffset = 12
-		indexedEntries       = binary.BigEndian.Uint32(rawGitIndex[8:entryStartByteOffset])
-		entryBytePointer     = 12
+		idxEntries           = binary.BigEndian.Uint32(gitIdxBody[8:entryStartByteOffset])
+		entryBytePtr         = 12
 		entryByteOffsetToSha = 40
 		shaLen               = 20
 	)
-	for i := 0; i < int(indexedEntries); i++ {
+	var r = make([]*idxEntry, idxEntries)
+	for i := 0; i < int(idxEntries); i++ {
 		var (
-			startOfShaOffset = (entryBytePointer) + (entryByteOffsetToSha)
+			startOfShaOffset = entryBytePtr + entryByteOffsetToSha
 			endOfShaOffset   = startOfShaOffset + shaLen
-			flagIndexStart   = endOfShaOffset
-			flagIndexEnd     = flagIndexStart + 2
-			startFileIndex   = flagIndexEnd
-			sha              = hex.EncodeToString(rawGitIndex[startOfShaOffset:endOfShaOffset])
-			nullIndex        = bytes.Index(rawGitIndex[startFileIndex:], []byte("\000"))
-			fileName         = rawGitIndex[startFileIndex : startFileIndex+nullIndex]
-			entryLen         = ((startFileIndex + len(fileName)) - entryBytePointer)
-			entryByted       = entryLen + (8 - (entryLen % 8))
+			flagIdxStart     = endOfShaOffset
+			flagIdxEnd       = flagIdxStart + 2
+			startFileIdx     = flagIdxEnd
+			sha              = hex.EncodeToString(gitIdxBody[startOfShaOffset:endOfShaOffset])
+			nullIdx          = bytes.Index(gitIdxBody[startFileIdx:], []byte("\000"))
+			fileName         = gitIdxBody[startFileIdx: startFileIdx+nullIdx]
+			entryLen         = (startFileIdx + len(fileName)) - entryBytePtr
+			entryByte        = entryLen + (8 - (entryLen % 8))
 		)
-		entry := &indexEntry{sha: sha, filename: string(fileName)}
-		r = append(r, entry)
-		entryBytePointer += entryByted
+		entry := &idxEntry{sha: sha, filename: string(fileName)}
+		r[i] = entry
+		entryBytePtr += entryByte
 	}
 
-	return
+	return r
 }
 
-func (gs *GitScraper) getAndPersist(remoteURI string, filePath string) {
-	res, err := gs.client.Get(remoteURI)
+func (gs *Scraper) getAndPersist(uri string, fp string) {
+	res, err := gs.client.Get(uri)
 	if err != nil {
 		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
@@ -136,26 +139,26 @@ func (gs *GitScraper) getAndPersist(remoteURI string, filePath string) {
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		err = errors.New(strconv.Itoa(res.StatusCode) + " " + filePath)
+		err = errors.New(strconv.Itoa(res.StatusCode) + " " + fp)
 		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 
-	objectFile, err := ioutil.ReadAll(res.Body)
+	objFiles, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 	if res.StatusCode != http.StatusOK {
-		err = errors.New(strconv.Itoa(res.StatusCode) + " " + filePath)
+		err = errors.New(strconv.Itoa(res.StatusCode) + " " + fp)
 		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 
-	br := bytes.NewReader(objectFile)
+	br := bytes.NewReader(objFiles)
 	zr, err := zlib.NewReader(br)
 	if err != nil {
 		gs.logger.FileSkipped(err)
@@ -170,26 +173,26 @@ func (gs *GitScraper) getAndPersist(remoteURI string, filePath string) {
 		return
 	}
 
-	nullIndex := bytes.Index(b, []byte("\000"))
-	err = gs.createPathToFile(filePath)
+	nullIdx := bytes.Index(b, []byte("\000"))
+	err = gs.createPathToFile(fp)
 	if err != nil {
 		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
-	err = ioutil.WriteFile(string(filePath), b[nullIndex:], os.ModePerm)
+	err = ioutil.WriteFile(string(fp), b[nullIdx:], os.ModePerm)
 	if err != nil {
 		gs.logger.FileSkipped(err)
 		gs.waitGroup.Done()
 		return
 	}
 
-	gs.logger.FileAdded(filePath)
+	gs.logger.FileAdded(fp)
 	gs.waitGroup.Done()
 }
 
-func (gs *GitScraper) createPathToFile(filePath string) error {
-	p := path.Dir(filePath)
+func (gs *Scraper) createPathToFile(fp string) error {
+	p := path.Dir(fp)
 	if p == "." {
 		return nil
 	}

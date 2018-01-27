@@ -38,10 +38,13 @@ c1f3161c27b7fb86615a4916f595473a0a76c774 .env
 
 Scraped source is found in `target.tld/...``
 
-# Developer notes
+# Developer notes / TODO
 Pull requests with features, fixes and refactoring are appreciated
 
 Things that come into mind
+- Extract contents of .PACK files
+- Choose output directory
+- Verbosity settings
 - Tests
 - Accepting a list of targets (from arg and file)
 - Throttle control
