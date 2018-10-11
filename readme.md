@@ -1,3 +1,10 @@
+![Gopher robbing git](https://raw.githubusercontent.com/RonnieSkansing/gorgit/master/assets/0.5x/gorgit-logo%400.5x.png)
+
+*Cute gopher Logo credits goes to [Paula Sobczak](https://paulajs.dk) based on [Renee French's gophers](http://reneefrench.blogspot.com/). 
+Logo is licensed under https://creativecommons.org/licenses/by/3.0/*
+
+
+
 # Description
 When deploying it is important to remove or cut off access to /.git folder
 
