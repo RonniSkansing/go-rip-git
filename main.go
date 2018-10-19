@@ -27,6 +27,8 @@ func main() {
 		reqTimeout:       flag.Int("t", 5, "Max time in seconds before request timeout"),
 	}
 
+	flag.Parse()
+
 	var (
 		transport = client.NewClientTransport(*f.reqMaxConcurrent)
 		cl, err   = client.NewClient(transport, *f.proxy, *f.reqTimeout)
@@ -52,8 +54,6 @@ func main() {
 		log.Error(errors.New("Invalid URL"), *f.url)
 		return
 	}
-
-
 
 	if *f.scrape {
 		sr.Scrape(uri)
