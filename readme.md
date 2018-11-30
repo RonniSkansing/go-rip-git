@@ -1,24 +1,21 @@
 ![Gopher robbing git](https://raw.githubusercontent.com/RonnieSkansing/gorgit/master/assets/0.5x/gorgit-logo%400.5x.png)
 
-*Cute gopher Logo credits goes to [Paula Sobczak](https://paulajs.dk) based on [Renee French's gophers](http://reneefrench.blogspot.com/). 
-Logo is licensed under https://creativecommons.org/licenses/by/3.0/*
+> credits and thanks to [Paula Sobczak](https://paulajs.dk) for logo based on [Renee French's gophers](http://reneefrench.blogspot.com/)
+> licensed under https://creativecommons.org/licenses/by/3.0/
 
 
 
 # Description
-When deploying it is important to remove or cut off access to /.git folder
+Most git scrapers require open directory listing in the .git folder or multiple dependencies. This tool requires neither.
 
-This program is used to extract information and pull the remote files locally.
+Scrapes source code by parsing the `/.git/index` file, downloads the object files referenced and unpacks to the source code.
 
-Use responsibly - Do no use on targets without prior permission. Also take when scraping the remote files, depending on the size of the repo, you might fire off more requests faster then you expect.
-
-Use at your own own risk.
-
+This is a security reconnaissance tool and is illegal to use without consent from the target is it used upon.
 
 # Install and build
 Get it
 
-`go get github.com/ronnieskansing/gorgit`
+`go get github.com/ronnieskansing/go-rip-git`
 
 Build it
 
@@ -26,7 +23,7 @@ Build it
 
 # Usage
 ### Show files
-`gorgit -u http://target.tld`
+`go-rip-git -u http://target.tld`
 
 Results in something like
 ```
@@ -36,10 +33,10 @@ c1f3161c27b7fb86615a4916f595473a0a76c774 .env
 ```
 
 ## Use a SOCKS5 proxy
-`gorgit -u http://target.tld -p 127.0.0.1:9150`
+`go-rip-git -u http://target.tld -p 127.0.0.1:9150`
 
 ## Scrape files
-`gorgit -u http://target.tld -s true`
+`go-rip-git -u http://target.tld -s true`
 
 **Warning** *This fires up 1 request for each file without any throttle and copies potentially private source code.*
 
