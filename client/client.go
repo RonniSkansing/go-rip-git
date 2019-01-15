@@ -1,7 +1,7 @@
 package client
 
 import (
-	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -26,15 +26,15 @@ func getHTTP(transport *http.Transport, timeout int) (*http.Client, error) {
 func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, error) {
 	err := testDialProxyReady(proxyURI)
 	if err != nil {
-		return nil, errors.New("Proxy not ready : " + err.Error())
+		return nil, fmt.Errorf("proxy not ready: %v", err)
 	}
 	tbProxyURL, err := url.Parse("socks5://" + proxyURI)
 	if err != nil {
-		return nil, errors.New("Failed to parse proxy URL: " + err.Error())
+		return nil, fmt.Errorf("failed to parse proxy url: %v", err)
 	}
 	tbDialer, err := proxy.FromURL(tbProxyURL, proxy.Direct)
 	if err != nil {
-		return nil, errors.New("Failed to obtain proxy dialer: " + err.Error())
+		return nil, fmt.Errorf("failed to setup proxy: %v", err)
 	}
 	tbTransport := &http.Transport{
 		Dial:                tbDialer.Dial,
@@ -47,10 +47,12 @@ func getProxyHTTP(proxyURI string, transport *http.Transport) (*http.Client, err
 
 func testDialProxyReady(proxyURI string) (err error) {
 	conn, err := net.Dial("tcp", proxyURI)
-	if conn != nil {
-		conn.Close()
+	if err != nil {
+		return fmt.Errorf("could not test if proxy is ready: %v", err)
 	}
-	return
+	if err := conn.Close(); err != nil {
+		return fmt.Errorf("failed to close proxy test connection: %v", err)
+	}
 }
 
 // NewClientTransport factory for *http.Transport
