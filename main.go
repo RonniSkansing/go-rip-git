@@ -7,9 +7,9 @@ import (
 	"flag"
 	"net/url"
 
-	"github.com/RonnieSkansing/go-rip-git/client"
-	"github.com/RonnieSkansing/go-rip-git/logger"
-	"github.com/RonnieSkansing/go-rip-git/scraper"
+	"github.com/RonniSkansing/go-rip-git/client"
+	"github.com/RonniSkansing/go-rip-git/logger"
+	"github.com/RonniSkansing/go-rip-git/scraper"
 )
 
 func main() {

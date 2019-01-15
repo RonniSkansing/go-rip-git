@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/RonnieSkansing/go-rip-git/logger"
+	"github.com/RonniSkansing/go-rip-git/logger"
 	"path/filepath"
 )
 
