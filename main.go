@@ -1,5 +1,3 @@
-// TODO: Add verbosity levels
-
 package main
 
 import (
