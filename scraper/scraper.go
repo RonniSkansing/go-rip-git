@@ -21,7 +21,7 @@ import (
 var gitPath = "/.git"
 var gitIdxFilePath = gitPath + "/index"
 var gitObjPath = gitPath + "/objects"
-// foo
+
 // Scraper Scrapes git
 type Scraper struct {
 	client    *http.Client
@@ -34,7 +34,7 @@ type idxEntry struct {
 	filename string
 }
 
-// NewScraper Creates a new scraper instance and returns a pointer to it
+// NewScraper Creates a new scraper instance pointer
 func NewScraper(client *http.Client, logger *logger.Logger) *Scraper {
 	return &Scraper{
 		client:    client,
@@ -43,14 +43,13 @@ func NewScraper(client *http.Client, logger *logger.Logger) *Scraper {
 	}
 }
 
-// GetIdx retrieves the git index file and returns it as an byte slice
+// GetIdx retrieves the git index file as a byte slice
 func (gs *Scraper) GetIdx(target *url.URL) (idxFile []byte, err error) {
 	res, err := gs.client.Get(target.String() + gitIdxFilePath)
 	if err != nil {
 		return
 	}
 	defer res.Body.Close()
-
 	if res.StatusCode != http.StatusOK {
 		return
 	}
@@ -117,7 +116,7 @@ func (gs *Scraper) parse(gitIdxBody []byte) []*idxEntry {
 			startFileIdx     = flagIdxEnd
 			sha              = hex.EncodeToString(gitIdxBody[startOfShaOffset:endOfShaOffset])
 			nullIdx          = bytes.Index(gitIdxBody[startFileIdx:], []byte("\000"))
-			fileName         = gitIdxBody[startFileIdx: startFileIdx+nullIdx]
+			fileName         = gitIdxBody[startFileIdx : startFileIdx+nullIdx]
 			entryLen         = (startFileIdx + len(fileName)) - entryBytePtr
 			entryByte        = entryLen + (8 - (entryLen % 8))
 		)
