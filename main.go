@@ -15,13 +15,14 @@ func main() {
 		target          = flag.String("u", "", "URL to scan")
 		scrape          = flag.Bool("s", false, "scrape source files")
 		idleConnTimeout = flag.Int("t", 5, "request connection idle timeout in seconds")
+		gitPath	= flag.String("p", "/.git/", "the absolute path to the git folder")
 	)
 	flag.Parse()
 	sr := scraper.NewScraper(
 		&http.Client{Timeout: time.Duration(*idleConnTimeout) * time.Second},
 		&logger.Logger{},
 	)
-	uri, err := url.ParseRequestURI(*target)
+	uri, err := url.ParseRequestURI(*target + *gitPath)
 	if err != nil {
 		log.Fatalf("invalid URL: %v", err)
 	}
@@ -35,7 +36,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to get index entries: %v", err)
 		}
-		log.Println("Contents of " + *target)
+		log.Println("Contents of " + uri.String())
 		for i := 0; i < len(entries); i++ {
 			log.Println(entries[i].Sha + " " + entries[i].FileName)
 		}

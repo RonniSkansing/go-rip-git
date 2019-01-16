@@ -19,10 +19,6 @@ import (
 	"path/filepath"
 )
 
-var gitPath = "/.git"
-var gitIdxFilePath = gitPath + "/index"
-var gitObjPath = gitPath + "/objects"
-
 // Scraper Scrapes git
 type Scraper struct {
 	client    *http.Client
@@ -47,7 +43,7 @@ func NewScraper(client *http.Client, logger *logger.Logger) *Scraper {
 
 // getIndexFile retrieves the git index file as a byte slice
 func (gs *Scraper) getIndexFile(target *url.URL) ([]byte, error) {
-	res, err := gs.client.Get(target.String() + gitIdxFilePath)
+	res, err := gs.client.Get(target.String() + "/index")
 	if err != nil {
 		return nil, err
 	}
@@ -62,8 +58,9 @@ func (gs *Scraper) getIndexFile(target *url.URL) ([]byte, error) {
 // Scrape parses remote git index and converts each listed file to source locally
 func (gs *Scraper) Scrape(target *url.URL) error {
 	h := target.Hostname()
-	gs.logger.Info("Building " + h)
-	os.MkdirAll(h, os.ModePerm)
+	if err := os.MkdirAll(h, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create scrape result folder: %v", err)
+	}
 
 	entries, err := gs.GetEntries(target)
 	if err != nil {
@@ -71,13 +68,12 @@ func (gs *Scraper) Scrape(target *url.URL) error {
 	}
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
-		remoteFile := target.String() + gitObjPath + "/" + entry.Sha[0:2] + "/" + entry.Sha[2:]
+		remoteFile := target.String() + "/objects/" + entry.Sha[0:2] + "/" + entry.Sha[2:]
 		gs.waitGroup.Add(1)
 		go gs.getAndPersist(remoteFile, filepath.Join(target.Hostname(), string(entry.FileName)))
 	}
 
 	gs.waitGroup.Wait()
-	gs.logger.Info("Finished " + h)
 }
 
 // GetEntries get entries from the git index file
