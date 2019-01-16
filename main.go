@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"github.com/RonniSkansing/go-rip-git/logger"
 	"github.com/RonniSkansing/go-rip-git/scraper"
 	"log"
 	"net/http"
@@ -15,12 +14,24 @@ func main() {
 		target          = flag.String("u", "", "URL to scan")
 		scrape          = flag.Bool("s", false, "scrape source files")
 		idleConnTimeout = flag.Int("t", 5, "request connection idle timeout in seconds")
-		gitPath	= flag.String("p", "/.git/", "the absolute path to the git folder")
+		gitPath         = flag.String("p", "/.git/", "the absolute path to the git folder")
+		concurrency     = flag.Int("c", 20, "concurrent scrape requests")
+		wait            = flag.Duration("wait", 1 * time.Second, "time in seconds to wait between each request, example 5s")
+		veryVerbose		= flag.Bool("vv", false, "very verbose output")
 	)
 	flag.Parse()
+
+	c := scraper.Config{
+		ConcurrentScrapeRequests: *concurrency,
+		WaitTimeBetweenRequest: *wait,
+		VeryVerbose: *veryVerbose,
+	}
 	sr := scraper.NewScraper(
 		&http.Client{Timeout: time.Duration(*idleConnTimeout) * time.Second},
-		&logger.Logger{},
+		&c,
+		func(err error) {
+			log.Printf("scrape error: %v", err)
+		},
 	)
 	uri, err := url.ParseRequestURI(*target + *gitPath)
 	if err != nil {

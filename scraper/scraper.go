@@ -5,25 +5,32 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
-	"strconv"
-	"sync"
-
-	"github.com/RonniSkansing/go-rip-git/logger"
 	"path/filepath"
+	"sync"
+	"time"
 )
+
+type ErrorHandler = func(error)
 
 // Scraper Scrapes git
 type Scraper struct {
-	client    *http.Client
-	logger    *logger.Logger
-	waitGroup *sync.WaitGroup
+	client       *http.Client
+	config       *Config
+	errorHandler ErrorHandler
+	waitGroup    *sync.WaitGroup
+	requestsRunning int
+}
+
+type Config struct {
+	ConcurrentScrapeRequests int
+	WaitTimeBetweenRequest   time.Duration
+	VeryVerbose              bool
 }
 
 // IdxEntry is a map between the Sha and the file it points to
@@ -33,17 +40,19 @@ type IdxEntry struct {
 }
 
 // NewScraper Creates a new scraper instance pointer
-func NewScraper(client *http.Client, logger *logger.Logger) *Scraper {
+func NewScraper(client *http.Client, config *Config, errHandler ErrorHandler) *Scraper {
 	return &Scraper{
-		client:    client,
-		logger:    logger,
-		waitGroup: &sync.WaitGroup{},
+		client:       client,
+		config:       config,
+		errorHandler: errHandler,
+		waitGroup:    &sync.WaitGroup{},
+		requestsRunning: 0,
 	}
 }
 
 // getIndexFile retrieves the git index file as a byte slice
-func (gs *Scraper) getIndexFile(target *url.URL) ([]byte, error) {
-	res, err := gs.client.Get(target.String() + "/index")
+func (s *Scraper) getIndexFile(target *url.URL) ([]byte, error) {
+	res, err := s.client.Get(target.String() + "/index")
 	if err != nil {
 		return nil, err
 	}
@@ -56,30 +65,34 @@ func (gs *Scraper) getIndexFile(target *url.URL) ([]byte, error) {
 }
 
 // Scrape parses remote git index and converts each listed file to source locally
-func (gs *Scraper) Scrape(target *url.URL) error {
+func (s *Scraper) Scrape(target *url.URL) error {
 	h := target.Hostname()
 	if err := os.MkdirAll(h, os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create scrape result folder: %v", err)
 	}
-
-	entries, err := gs.GetEntries(target)
+	entries, err := s.GetEntries(target)
 	if err != nil {
 		return err
 	}
+	concurrent := 0
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
 		remoteFile := target.String() + "/objects/" + entry.Sha[0:2] + "/" + entry.Sha[2:]
-		gs.waitGroup.Add(1)
-		go gs.getAndPersist(remoteFile, filepath.Join(target.Hostname(), string(entry.FileName)))
+		s.waitGroup.Add(1)
+		s.requestsRunning++
+		if s.requestsRunning == s.config.ConcurrentScrapeRequests {
+			s.waitGroup.Wait()
+		}
+		go s.getAndPersist(remoteFile, filepath.Join(target.Hostname(), entry.FileName))
 	}
-
-	gs.waitGroup.Wait()
+	//
+	return nil
 }
 
 // GetEntries get entries from the git index file
 // https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
-func (gs *Scraper) GetEntries(target *url.URL) ([]*IdxEntry, error) {
-	idx, err := gs.getIndexFile(target)
+func (s *Scraper) GetEntries(target *url.URL) ([]*IdxEntry, error) {
+	idx, err := s.getIndexFile(target)
 	if err != nil {
 		return nil, err
 	}
@@ -112,73 +125,55 @@ func (gs *Scraper) GetEntries(target *url.URL) ([]*IdxEntry, error) {
 	return r, nil
 }
 
-func (gs *Scraper) getAndPersist(uri string, fp string) {
-	res, err := gs.client.Get(uri)
-	if err != nil {
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
+func (s *Scraper) error(err error) {
+	if s.config.VeryVerbose {
+		s.errorHandler(err)
 	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		err = errors.New(strconv.Itoa(res.StatusCode) + " " + fp)
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
-	}
-
-	objFiles, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
-	}
-	if res.StatusCode != http.StatusOK {
-		err = errors.New(strconv.Itoa(res.StatusCode) + " " + fp)
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
-	}
-
-	br := bytes.NewReader(objFiles)
-	zr, err := zlib.NewReader(br)
-	if err != nil {
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
-	}
-
-	b, err := ioutil.ReadAll(zr)
-	if err != nil {
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
-	}
-
-	nullIdx := bytes.Index(b, []byte("\000"))
-	err = gs.createPathToFile(fp)
-	if err != nil {
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
-	}
-	err = ioutil.WriteFile(string(fp), b[nullIdx:], os.ModePerm)
-	if err != nil {
-		gs.logger.FileSkipped(err)
-		gs.waitGroup.Done()
-		return
-	}
-
-	gs.logger.FileAdded(fp)
-	gs.waitGroup.Done()
 }
 
-func (gs *Scraper) createPathToFile(fp string) error {
-	p := path.Dir(fp)
-	if p == "." {
-		return nil
+func (s *Scraper) getAndPersist(uri string, filePath string) {
+	p := path.Dir(filePath)
+	if p == "."  {
+		return
 	}
+	res, err := s.client.Get(uri)
+	defer func() {
+		res.Body.Close()
+		time.Sleep(s.config.WaitTimeBetweenRequest)
+		s.requestsRunning--
+		s.waitGroup.Done()
+	}()
 
-	return os.MkdirAll(p, os.ModePerm)
+	if err != nil {
+		s.error(err)
+		return
+	}
+	if res.StatusCode != http.StatusOK {
+		s.error(fmt.Errorf("%s : %s", res.Status, filePath))
+		return
+	}
+	objF, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		s.error(fmt.Errorf("failed to read body on %s : %v", filePath, err))
+		return
+	}
+	r, err := zlib.NewReader(bytes.NewReader(objF))
+	if err != nil {
+		s.error(fmt.Errorf("failed to create zlib reader: %v", err))
+		return
+	}
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		s.error(fmt.Errorf("failed to read from zlib reader: %v", err))
+		return
+	}
+	if err := os.MkdirAll(p, os.ModePerm); err != nil {
+		s.error(fmt.Errorf("failed to create target folder: %v", err))
+		return
+	}
+	nullIdx := bytes.Index(b, []byte("\000"))
+	err = ioutil.WriteFile(filePath, b[nullIdx:], os.ModePerm)
+	if err != nil {
+		s.error(fmt.Errorf("failed to write target source: %v", err))
+	}
 }

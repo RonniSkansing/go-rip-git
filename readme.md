@@ -33,11 +33,8 @@ Pull requests with features, fixes and refactoring are appreciated
 Things that come into mind
 - Extract contents of .PACK files
 - Choose output directory
-- Verbosity settings
 - Tests
 - Accepting a list of targets (from arg and file)
-- Throttle control
-- Setting of verbosity level
 
 Found a **bug**? Create an issue
 
