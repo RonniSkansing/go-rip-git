@@ -6,15 +6,6 @@ Not for use on git servers but for deploys accidentally including the `.git` fol
 
 Zero dependencies and does not require the target to have open directory listing.
 
-# Install and build
-Get it
-
-`go get github.com/ronnieskansing/go-rip-git`
-
-Build it
-
-`go build`
-
 # Usage
 ### Show files
 `go-rip-git -u http://target.tld`
@@ -25,6 +16,10 @@ c1f3161c27b7fb86615a4916f595473a0a76c774 .env
 29c16c3f37ea57569fbf9cc1ce183938a9710aed config/config.json
 ...
 ```
+
+## Proxy
+HTTPS_PROXY="socks5://127.0.0.1:9150/" go-rip-git -u http://target.tld
+
 ## Scrape files
 `go-rip-git -u http://target.tld -s true`
 
