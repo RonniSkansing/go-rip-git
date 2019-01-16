@@ -74,7 +74,6 @@ func (s *Scraper) Scrape(target *url.URL) error {
 	if err != nil {
 		return err
 	}
-	concurrent := 0
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
 		remoteFile := target.String() + "/objects/" + entry.Sha[0:2] + "/" + entry.Sha[2:]
