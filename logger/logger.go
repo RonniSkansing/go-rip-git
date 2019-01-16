@@ -8,9 +8,9 @@ import (
 // Logger for logging all the things
 type Logger struct{}
 
-// Error log a error
-func (lr *Logger) Error(err error, s string) {
-	log.Fatalln(fmt.Sprintf("Error : %s (%s)", s, err))
+// Error log a error and exit
+func (lr *Logger) Error(err error) {
+	log.Fatalln(fmt.Sprintf("Error : %v", err))
 }
 
 // Info log info

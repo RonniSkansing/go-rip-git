@@ -26,8 +26,18 @@ func main() {
 		log.Fatalf("invalid URL: %v", err)
 	}
 	if *scrape {
-		sr.Scrape(uri)
+		err := sr.Scrape(uri)
+		if err != nil {
+			log.Fatalf("failed to scrape: %v", err)
+		}
 	} else {
-		sr.ShowFiles(uri)
+		entries, err := sr.GetEntries(uri)
+		if err != nil {
+			log.Fatalf("failed to get index entries: %v", err)
+		}
+		log.Println("Contents of " + *target)
+		for i := 0; i < len(entries); i++ {
+			log.Println(entries[i].Sha + " " + entries[i].FileName)
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -29,9 +30,10 @@ type Scraper struct {
 	waitGroup *sync.WaitGroup
 }
 
-type idxEntry struct {
-	sha      string
-	filename string
+// IdxEntry is a map between the Sha and the file it points to
+type IdxEntry struct {
+	Sha      string
+	FileName string
 }
 
 // NewScraper Creates a new scraper instance pointer
@@ -43,70 +45,56 @@ func NewScraper(client *http.Client, logger *logger.Logger) *Scraper {
 	}
 }
 
-// GetIdx retrieves the git index file as a byte slice
-func (gs *Scraper) GetIdx(target *url.URL) (idxFile []byte, err error) {
+// getIndexFile retrieves the git index file as a byte slice
+func (gs *Scraper) getIndexFile(target *url.URL) ([]byte, error) {
 	res, err := gs.client.Get(target.String() + gitIdxFilePath)
 	if err != nil {
-		return
+		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return
+		return nil, fmt.Errorf("failed to get index file: %s", res.Status)
 	}
 
 	return ioutil.ReadAll(res.Body)
 }
 
-// ShowFiles shows each file from index
-func (gs *Scraper) ShowFiles(target *url.URL) {
-	h := target.Hostname()
-	idxFile, err := gs.GetIdx(target)
-	if err != nil {
-		gs.logger.Error(err, "Failed to get index of "+target.Hostname())
-		return
-	}
-
-	gs.logger.Info("Contents of " + h)
-	entries := gs.parse(idxFile)
-	for i := 0; i < len(entries); i++ {
-		gs.logger.Entry(entries[i].sha + " " + entries[i].filename)
-	}
-}
-
 // Scrape parses remote git index and converts each listed file to source locally
-func (gs *Scraper) Scrape(target *url.URL) {
+func (gs *Scraper) Scrape(target *url.URL) error {
 	h := target.Hostname()
-	idxFile, err := gs.GetIdx(target)
-	if err != nil {
-		gs.logger.Error(err, "Failed to get index of "+target.Hostname())
-		return
-	}
 	gs.logger.Info("Building " + h)
 	os.MkdirAll(h, os.ModePerm)
 
-	entries := gs.parse(idxFile)
+	entries, err := gs.GetEntries(target)
+	if err != nil {
+		return err
+	}
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
-		remoteFile := target.String() + gitObjPath + "/" + entry.sha[0:2] + "/" + entry.sha[2:]
+		remoteFile := target.String() + gitObjPath + "/" + entry.Sha[0:2] + "/" + entry.Sha[2:]
 		gs.waitGroup.Add(1)
-		go gs.getAndPersist(remoteFile, filepath.Join(target.Hostname(), string(entry.filename)))
+		go gs.getAndPersist(remoteFile, filepath.Join(target.Hostname(), string(entry.FileName)))
 	}
 
 	gs.waitGroup.Wait()
 	gs.logger.Info("Finished " + h)
 }
 
-// Parse get the idxEntry of the git index file
+// GetEntries get entries from the git index file
 // https://github.com/git/git/blob/master/Documentation/technical/index-format.txt
-func (gs *Scraper) parse(gitIdxBody []byte) []*idxEntry {
+func (gs *Scraper) GetEntries(target *url.URL) ([]*IdxEntry, error) {
+	idx, err := gs.getIndexFile(target)
+	if err != nil {
+		return nil, err
+	}
 	var (
 		entryStartByteOffset = 12
-		idxEntries           = binary.BigEndian.Uint32(gitIdxBody[8:entryStartByteOffset])
+		idxEntries           = binary.BigEndian.Uint32(idx[8:entryStartByteOffset])
 		entryBytePtr         = 12
 		entryByteOffsetToSha = 40
 		shaLen               = 20
 	)
-	var r = make([]*idxEntry, idxEntries)
+	var r = make([]*IdxEntry, idxEntries)
 	for i := 0; i < int(idxEntries); i++ {
 		var (
 			startOfShaOffset = entryBytePtr + entryByteOffsetToSha
@@ -114,18 +102,18 @@ func (gs *Scraper) parse(gitIdxBody []byte) []*idxEntry {
 			flagIdxStart     = endOfShaOffset
 			flagIdxEnd       = flagIdxStart + 2
 			startFileIdx     = flagIdxEnd
-			sha              = hex.EncodeToString(gitIdxBody[startOfShaOffset:endOfShaOffset])
-			nullIdx          = bytes.Index(gitIdxBody[startFileIdx:], []byte("\000"))
-			fileName         = gitIdxBody[startFileIdx : startFileIdx+nullIdx]
+			sha              = hex.EncodeToString(idx[startOfShaOffset:endOfShaOffset])
+			nullIdx          = bytes.Index(idx[startFileIdx:], []byte("\000"))
+			fileName         = idx[startFileIdx : startFileIdx+nullIdx]
 			entryLen         = (startFileIdx + len(fileName)) - entryBytePtr
 			entryByte        = entryLen + (8 - (entryLen % 8))
 		)
-		entry := &idxEntry{sha: sha, filename: string(fileName)}
+		entry := &IdxEntry{Sha: sha, FileName: string(fileName)}
 		r[i] = entry
 		entryBytePtr += entryByte
 	}
 
-	return r
+	return r, nil
 }
 
 func (gs *Scraper) getAndPersist(uri string, fp string) {
