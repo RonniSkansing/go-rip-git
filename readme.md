@@ -7,6 +7,24 @@ Not for use on git servers but for deploys accidentally including the `.git` fol
 Zero dependencies and does not require the target to have open directory listing.
 
 # Usage
+
+```
+Usage of go-rip-git:
+  -c int
+    	concurrent scrape requests (default 100)
+  -p string
+    	the absolute path to the git folder (default "/.git/")
+  -s	scrape source files
+  -t int
+    	request connection idle timeout in seconds (default 5)
+  -u string
+    	URL to scan
+  -vv
+    	very verbose output
+  -w duration
+    	time in seconds to wait between each request, example 5s
+```
+
 ### Show files
 `go-rip-git -u http://target.tld`
 
@@ -23,9 +41,7 @@ HTTP_PROXY="socks5://127.0.0.1:9150/" go-rip-git -u http://target.tld
 HTTPS_PROXY="socks5://127.0.0.1:9150/" go-rip-git -u https://target.tld
 
 ## Scrape files
-`go-rip-git -u http://target.tld -s true`
-
-**Warning** *This fires up 1 request for each file without any throttle and copies potentially private source code.*
+`go-rip-git -u http://target.tld -s`
 
 Scraped source is found in `target.tld/...``
 
