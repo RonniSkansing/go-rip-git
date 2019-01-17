@@ -19,6 +19,7 @@ c1f3161c27b7fb86615a4916f595473a0a76c774 .env
 
 ## Proxy
 HTTP_PROXY="socks5://127.0.0.1:9150/" go-rip-git -u http://target.tld
+
 HTTPS_PROXY="socks5://127.0.0.1:9150/" go-rip-git -u https://target.tld
 
 ## Scrape files
