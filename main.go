@@ -15,16 +15,21 @@ func main() {
 		scrape          = flag.Bool("s", false, "scrape source files")
 		idleConnTimeout = flag.Int("t", 5, "request connection idle timeout in seconds")
 		gitPath         = flag.String("p", "/.git/", "the absolute path to the git folder")
-		concurrency     = flag.Int("c", 20, "concurrent scrape requests")
-		wait            = flag.Duration("wait", 1 * time.Second, "time in seconds to wait between each request, example 5s")
+		concurrency     = flag.Int("c", 100, "concurrent scrape requests")
+		wait            = flag.Duration("w", 0 * time.Second, "time in seconds to wait between each request, example 5s")
 		veryVerbose		= flag.Bool("vv", false, "very verbose output")
 	)
 	flag.Parse()
 
+	if len(*target) == 0 {
+		flag.PrintDefaults()
+		return
+	}
+
 	c := scraper.Config{
-		ConcurrentScrapeRequests: *concurrency,
+		ConcurrentRequests:     *concurrency,
 		WaitTimeBetweenRequest: *wait,
-		VeryVerbose: *veryVerbose,
+		VeryVerbose:            *veryVerbose,
 	}
 	sr := scraper.NewScraper(
 		&http.Client{Timeout: time.Duration(*idleConnTimeout) * time.Second},

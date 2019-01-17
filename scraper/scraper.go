@@ -20,17 +20,16 @@ type ErrorHandler = func(error)
 
 // Scraper Scrapes git
 type Scraper struct {
-	client       *http.Client
-	config       *Config
-	errorHandler ErrorHandler
-	waitGroup    *sync.WaitGroup
-	requestsRunning int
+	client          *http.Client
+	config          *Config
+	errorHandler    ErrorHandler
+	waitGroup       *sync.WaitGroup
 }
 
 type Config struct {
-	ConcurrentScrapeRequests int
-	WaitTimeBetweenRequest   time.Duration
-	VeryVerbose              bool
+	ConcurrentRequests     int
+	WaitTimeBetweenRequest time.Duration
+	VeryVerbose            bool
 }
 
 // IdxEntry is a map between the Sha and the file it points to
@@ -42,17 +41,16 @@ type IdxEntry struct {
 // NewScraper Creates a new scraper instance pointer
 func NewScraper(client *http.Client, config *Config, errHandler ErrorHandler) *Scraper {
 	return &Scraper{
-		client:       client,
-		config:       config,
-		errorHandler: errHandler,
-		waitGroup:    &sync.WaitGroup{},
-		requestsRunning: 0,
+		client:          client,
+		config:          config,
+		errorHandler:    errHandler,
+		waitGroup:       &sync.WaitGroup{},
 	}
 }
 
 // getIndexFile retrieves the git index file as a byte slice
 func (s *Scraper) getIndexFile(target *url.URL) ([]byte, error) {
-	res, err := s.client.Get(target.String() + "/index")
+	res, err := s.client.Get(target.String() + "index")
 	if err != nil {
 		return nil, err
 	}
@@ -71,20 +69,35 @@ func (s *Scraper) Scrape(target *url.URL) error {
 		return fmt.Errorf("failed to create scrape result folder: %v", err)
 	}
 	entries, err := s.GetEntries(target)
+	time.Sleep(s.config.WaitTimeBetweenRequest)
 	if err != nil {
 		return err
 	}
-	for i := 0; i < len(entries); i++ {
-		entry := entries[i]
-		remoteFile := target.String() + "/objects/" + entry.Sha[0:2] + "/" + entry.Sha[2:]
-		s.waitGroup.Add(1)
-		s.requestsRunning++
-		if s.requestsRunning == s.config.ConcurrentScrapeRequests {
-			s.waitGroup.Wait()
-		}
-		go s.getAndPersist(remoteFile, filepath.Join(target.Hostname(), entry.FileName))
+
+	throttle := sync.WaitGroup{}
+	untilDone := sync.WaitGroup{}
+	onDone := func() {
+		untilDone.Done()
 	}
-	//
+	for i, j := 0, 1; i < len(entries); i,j = i+1, j+1{
+		untilDone.Add(1)
+		if j >= s.config.ConcurrentRequests {
+			s.waitGroup.Add(1)
+			onDone = func() {
+				throttle.Done()
+				untilDone.Done()
+			}
+		}
+		entry := entries[i]
+		f  := target.String() + "objects/" + entry.Sha[0:2] + "/" + entry.Sha[2:]
+		go s.getAndPersist(f, filepath.Join(target.Hostname(), entry.FileName), onDone)
+		time.Sleep(s.config.WaitTimeBetweenRequest)
+		if j >= s.config.ConcurrentRequests {
+			throttle.Wait()
+		}
+	}
+	untilDone.Wait()
+
 	return nil
 }
 
@@ -130,17 +143,15 @@ func (s *Scraper) error(err error) {
 	}
 }
 
-func (s *Scraper) getAndPersist(uri string, filePath string) {
+func (s *Scraper) getAndPersist(uri string, filePath string, onDone func()) {
 	p := path.Dir(filePath)
-	if p == "."  {
+	if p == "." {
 		return
 	}
 	res, err := s.client.Get(uri)
 	defer func() {
 		res.Body.Close()
-		time.Sleep(s.config.WaitTimeBetweenRequest)
-		s.requestsRunning--
-		s.waitGroup.Done()
+		onDone()
 	}()
 
 	if err != nil {
