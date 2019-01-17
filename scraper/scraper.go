@@ -23,7 +23,6 @@ type Scraper struct {
 	client          *http.Client
 	config          *Config
 	errorHandler    ErrorHandler
-	waitGroup       *sync.WaitGroup
 }
 
 type Config struct {
@@ -44,7 +43,6 @@ func NewScraper(client *http.Client, config *Config, errHandler ErrorHandler) *S
 		client:          client,
 		config:          config,
 		errorHandler:    errHandler,
-		waitGroup:       &sync.WaitGroup{},
 	}
 }
 
@@ -82,7 +80,7 @@ func (s *Scraper) Scrape(target *url.URL) error {
 	for i, j := 0, 1; i < len(entries); i,j = i+1, j+1{
 		untilDone.Add(1)
 		if j >= s.config.ConcurrentRequests {
-			s.waitGroup.Add(1)
+			throttle.Add(1)
 			onDone = func() {
 				throttle.Done()
 				untilDone.Done()
@@ -150,10 +148,8 @@ func (s *Scraper) getAndPersist(uri string, filePath string, onDone func()) {
 	}
 	res, err := s.client.Get(uri)
 	defer func() {
-		res.Body.Close()
 		onDone()
 	}()
-
 	if err != nil {
 		s.error(err)
 		return
@@ -163,6 +159,7 @@ func (s *Scraper) getAndPersist(uri string, filePath string, onDone func()) {
 		return
 	}
 	objF, err := ioutil.ReadAll(res.Body)
+	defer res.Body.Close()
 	if err != nil {
 		s.error(fmt.Errorf("failed to read body on %s : %v", filePath, err))
 		return
